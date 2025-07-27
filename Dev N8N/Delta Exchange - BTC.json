@@ -1,0 +1,1315 @@
+{
+  "name": "Delta Exchange - BTC",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://api.delta.exchange/v2/tickers/BTCUSDT",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -40,
+        0
+      ],
+      "id": "d5c26cd1-2a6f-4dc8-a4a9-9bbcb9828710",
+      "name": "Get BTCUSDT Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const spot = $input.first().json.result.spot_price; // e.g., 108422\nconst step = 200;\n\n// Calculate strikes\nconst lowerStrike = Math.floor(spot / step) * step;\nconst upperStrike = Math.ceil(spot / step) * step;\n\n// All Time Slot data (with passed_hours, Run, etc.)\nconst timeSlots = $(\"Time is 5:30 AM?\").all();\n\n// Return each item properly in array format\nreturn timeSlots.map(item => {\n  return {\n    json: {\n      ...item.json,\n      lowerStrike,\n      upperStrike\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        180,
+        0
+      ],
+      "id": "7df544ad-28f6-4e3c-b5c4-ec74fdc86207",
+      "name": "Get Lower & Upper Strike"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputItems = $input.all();\n\nconst results = [];\n\nfor (const item of inputItems) {\n  const expiry = item.json.expiry;\n  const type = item.json.type;\n  const lowerStrike = item.json.lowerStrike;\n  const upperStrike = item.json.upperStrike;\n\n  results.push(\n    {\n      json: {\n        ...item.json,\n        symbol: `C-BTC-${upperStrike}-${expiry}`,\n        label: 'call-upper',\n        type\n      }\n    },\n    {\n      json: {\n        ...item.json,\n        symbol: `P-BTC-${upperStrike}-${expiry}`,\n        label: 'put-upper',\n        type\n      }\n    },\n    {\n      json: {\n        ...item.json,\n        symbol: `C-BTC-${lowerStrike}-${expiry}`,\n        label: 'call-lower',\n        type\n      }\n    },\n    {\n      json: {\n        ...item.json,\n        symbol: `P-BTC-${lowerStrike}-${expiry}`,\n        label: 'put-lower',\n        type\n      }\n    }\n  );\n}\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        100
+      ],
+      "id": "58a07e0b-b58e-44b1-894a-aad848394ea2",
+      "name": "Form Strike Price"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.india.delta.exchange/v2/tickers?contract_types=call_options,put_options&underlying_asset_symbols=BTC&expiry_date={{ $json.expiry.slice(0, 2) }}-{{ $json.expiry.slice(2, 4) }}-20{{ $json.expiry.slice(4, 6) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        100
+      ],
+      "id": "85337303-5608-4c26-a805-3ce65a0e38bb",
+      "name": "Get Strike Price Data"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 * * * *"
+            },
+            {
+              "field": "cronExpression",
+              "expression": "0 55 13 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2240,
+        350
+      ],
+      "id": "42f52997-59d9-4ea3-a574-b46153af7bd9",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "let lastExpiry = null;\nlet counter = 0;\n\nreturn items.map(item => {\n  const expiry = item.json[\"Expiry Date\"];\n\n  if (expiry !== lastExpiry) {\n    counter = 1;\n    lastExpiry = expiry;\n  } else {\n    counter++;\n  }\n\n  // Create Unique ID\n  item.json[\"Unique ID\"] = `${item.json[\"Entry Date\"]}_${item.json[\"Expiry Date\"]}_${item.json[\"Strike Price\"]}_${counter}`;\n\n  // Remove temp customIndex if exists\n  delete item.json.customIndex;\n\n  return item;\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        100
+      ],
+      "id": "ff509fc6-a724-443f-8dc0-0bfcf837fabc",
+      "name": "Generate Unique ID"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "59dd7e93-0fac-43f2-a919-fa47b7f39aea",
+              "name": "Entry Date",
+              "value": "={{ $('Loop All Strike Price').first().json.entry }}",
+              "type": "string"
+            },
+            {
+              "id": "38642f31-3ed4-4c5c-83ae-6841e97699a9",
+              "name": "Expiry Date",
+              "value": "={{ $('Loop All Strike Price').first().json.expiry }}",
+              "type": "string"
+            },
+            {
+              "id": "bf3e4ee8-c72e-470a-82e3-2272d2161a3e",
+              "name": "Strike Price",
+              "value": "={{ \n  `${$json.strike_price} ${$json.type === 'call_options' ? 'C' : 'P'}`\n}}",
+              "type": "string"
+            },
+            {
+              "id": "26b08cbf-8c32-4670-8227-254b04b82ad7",
+              "name": "={{ parseInt($('Form Strike Price').item.json.passed_hours) }}",
+              "value": "={{ parseInt($json.mark_price) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1060,
+        100
+      ],
+      "id": "f70d47a4-3679-47c7-accc-5de5f23ce21f",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const { entry, current_time } = item.json;\n\n  // Helper to safely create IST Date\n  const createISTDate = (yyyy, mm, dd, hh, min) => {\n    const isoString = `${yyyy}-${String(mm + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}T${String(hh).padStart(2, '0')}:${String(min).padStart(2, '0')}:00+05:30`;\n    return new Date(isoString);\n  };\n\n  // Parse entry \"ddmmyy\"\n  const dd = parseInt(entry.slice(0, 2), 10);\n  const mm = parseInt(entry.slice(2, 4), 10) - 1;\n  const yy = parseInt(entry.slice(4, 6), 10);\n  const fullYear = 2000 + yy;\n\n  // Correct IST entry and expiry times\n  const entryDate = createISTDate(fullYear, mm, dd, 5, 30);\n  const expiryDate = createISTDate(fullYear, mm, dd + 1, 17, 30);\n\n  // Parse current_time manually\n  const [datePart, timePart] = current_time.split(', ');\n  const [d, m, y] = datePart.split('/').map(Number);\n  let [time, meridian] = timePart.split(' ');\n  let [hour, minute, second] = time.split(':').map(Number);\n  if (meridian.toLowerCase() === 'pm' && hour !== 12) hour += 12;\n  if (meridian.toLowerCase() === 'am' && hour === 12) hour = 0;\n\n  const currentDate = createISTDate(y, m - 1, d, hour, minute);\n\n  // Calculate total and passed hours\n  const totalMs = expiryDate - entryDate;\n  const totalHours = totalMs / (1000 * 60 * 60);\n\n  let passedMs = currentDate - entryDate;\n  if (currentDate < entryDate) passedMs = 0;\n  else if (currentDate > expiryDate) passedMs = expiryDate - entryDate;\n\n  const passedHours = passedMs / (1000 * 60 * 60);\n\n  return {\n    json: {\n      ...item.json,\n      entry_time: entryDate.toLocaleString(\"en-IN\", { timeZone: \"Asia/Kolkata\" }),\n      expiry_time: expiryDate.toLocaleString(\"en-IN\", { timeZone: \"Asia/Kolkata\" }),\n      total_hours: Number(totalHours.toFixed(2)),\n      passed_hours: Number(passedHours.toFixed(2))\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1580,
+        350
+      ],
+      "id": "5dd6b777-31cb-4c83-8aa6-1e54504a91fd",
+      "name": "Time Difference"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const passed = Number(item.json.passed_hours?.toFixed(4)); // better precision\n  const allowed = [0, 3, 5, 6, 9, 12, 15, 18, 22, 24, 27, 29, 30, 33, 35.92];\n\n  const tolerance = 0.01; // ≈ 36 seconds\n  const shouldRun = allowed.some(hour => Math.abs(passed - hour) <= tolerance);\n\n  return {\n    json: {\n      ...item.json,\n      Run: shouldRun,\n      passed\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        350
+      ],
+      "id": "2263212d-d252-4539-abf0-8b5d49add8da",
+      "name": "Time Slot"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.flatMap(item => {\n  const currentDateString = item.json.currentDate;\n\n  // Parse the provided current timestamp\n  const nowIST = new Date(currentDateString);\n\n  // Format DDMMYY\n  const formatDDMMYY = (date) => {\n    const dd = String(date.getDate()).padStart(2, '0');\n    const mm = String(date.getMonth() + 1).padStart(2, '0');\n    const yy = String(date.getFullYear()).slice(-2);\n    return `${dd}${mm}${yy}`;\n  };\n\n  // Helper: build date in IST directly at 5:30 AM or 5:30 PM (no shifting)\n  const buildISTDate = (year, month, day, hour, minute) => {\n    const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+05:30`;\n    return new Date(iso);\n  };\n\n  const year = nowIST.getFullYear();\n  const month = nowIST.getMonth();\n  const day = nowIST.getDate();\n\n  const today530AM = buildISTDate(year, month, day, 5, 30);\n\n  // if current time < 5:30AM, consider previous day’s 5:30AM as \"entry\"\n  if (nowIST < today530AM) today530AM.setDate(today530AM.getDate() - 1);\n\n  const entryCurrent = buildISTDate(today530AM.getFullYear(), today530AM.getMonth(), today530AM.getDate(), 5, 30);\n  const expiryCurrent = buildISTDate(today530AM.getFullYear(), today530AM.getMonth(), today530AM.getDate() + 1, 17, 30);\n\n  const entryPrevious = buildISTDate(today530AM.getFullYear(), today530AM.getMonth(), today530AM.getDate() - 1, 5, 30);\n  const expiryPrevious = buildISTDate(today530AM.getFullYear(), today530AM.getMonth(), today530AM.getDate(), 17, 30);\n\n  const formatIST = (date) => date.toLocaleString(\"en-IN\", { timeZone: \"Asia/Kolkata\" });\n\n  const baseData = (type, expiry, entry, entryTime, expiryTime) => ({\n    json: {\n      type,\n      entry,\n      expiry,\n      symbol_C: `C-BTC-${expiry}`,\n      symbol_P: `P-BTC-${expiry}`,\n      current_time: formatIST(nowIST),\n      entry_time: formatIST(entryTime),\n      expiry_time: formatIST(expiryTime)\n    }\n  });\n\n  const result = [];\n\n  if (nowIST >= entryCurrent && nowIST <= expiryCurrent) {\n    result.push(baseData(\"current\", formatDDMMYY(expiryCurrent), formatDDMMYY(entryCurrent), entryCurrent, expiryCurrent));\n  }\n\n  if (nowIST >= entryPrevious && nowIST < expiryPrevious) {\n    result.push(baseData(\"previous\", formatDDMMYY(expiryPrevious), formatDDMMYY(entryPrevious), entryPrevious, expiryPrevious));\n  }\n\n  return result;\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1800,
+        350
+      ],
+      "id": "6da29bbf-d21c-43d1-9ba4-1b30023c3c56",
+      "name": "Get Entry & Exit Date"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1140,
+        350
+      ],
+      "id": "04bbd847-5d63-4493-a7a5-b5b907f14fb9",
+      "name": "Loop All Strike Price"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a950df74-3c1a-4bf9-8873-895a32d56b9b",
+              "leftValue": "={{ $(\"Check Unique ID\").item.json['Unique ID'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1720,
+        50
+      ],
+      "id": "5a167150-1374-4b33-903b-2c97f9b4567f",
+      "name": "Unique ID Exist?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputItems = $input.all();\n\n// Check if input is exactly one empty object\nconst isEmptyInput = inputItems.length === 1 && Object.keys(inputItems[0].json).length === 0;\n\nif (isEmptyInput) {\n  // Return all items from \"Generate Unique ID\" node\n  return $('Generate Unique ID').all();\n}\n\n// Otherwise, return the original input\nreturn inputItems;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        50
+      ],
+      "id": "10b552de-b009-4045-8320-100245fdadd8",
+      "name": "Get Unique ID"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA",
+          "mode": "list",
+          "cachedResultName": "Delta Exchange Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1035577510,
+          "mode": "list",
+          "cachedResultName": "BTC",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit#gid=1035577510"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Unique ID",
+              "lookupValue": "={{ $json[\"Unique ID\"] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1500,
+        60
+      ],
+      "id": "8b696a9b-81b6-4805-aa78-11b720073db5",
+      "name": "Check Unique ID",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "credentials": {
+        "googleApi": {
+          "id": "eocV2BBNNMkAOGPj",
+          "name": "Google Sheets account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA",
+          "mode": "list",
+          "cachedResultName": "Delta Exchange Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1035577510,
+          "mode": "list",
+          "cachedResultName": "BTC",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit#gid=1035577510"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Unique ID": "={{ $json[\"Unique ID\"] }}",
+            "Entry Date": "={{ $json[\"Entry Date\"] }}",
+            "Expiry Date": "={{ $json[\"Expiry Date\"] }}",
+            "Strike Price": "={{ $json[\"Strike Price\"] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Unique ID",
+              "displayName": "Unique ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Expiry Date",
+              "displayName": "Expiry Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Entry Date",
+              "displayName": "Entry Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Strike Price",
+              "displayName": "Strike Price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "0",
+              "displayName": "0",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "3",
+              "displayName": "3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "5",
+              "displayName": "5",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "6",
+              "displayName": "6",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "9",
+              "displayName": "9",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "12",
+              "displayName": "12",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "15",
+              "displayName": "15",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "18",
+              "displayName": "18",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "22",
+              "displayName": "22",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "24",
+              "displayName": "24",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "27",
+              "displayName": "27",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "29",
+              "displayName": "29",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "30",
+              "displayName": "30",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "33",
+              "displayName": "33",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "35",
+              "displayName": "35",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2160,
+        60
+      ],
+      "id": "bdaa22ee-f321-481c-9354-1498e157e02c",
+      "name": "Send Unique ID",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "credentials": {
+        "googleApi": {
+          "id": "eocV2BBNNMkAOGPj",
+          "name": "Google Sheets account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA",
+          "mode": "list",
+          "cachedResultName": "Delta Exchange Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1035577510,
+          "mode": "list",
+          "cachedResultName": "BTC",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit#gid=1035577510"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "Unique ID"
+          ],
+          "schema": [
+            {
+              "id": "Unique ID",
+              "displayName": "Unique ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Expiry Date",
+              "displayName": "Expiry Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Entry Date",
+              "displayName": "Entry Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Strike Price",
+              "displayName": "Strike Price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "0",
+              "displayName": "0",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "3",
+              "displayName": "3",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "5",
+              "displayName": "5",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "6",
+              "displayName": "6",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "9",
+              "displayName": "9",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "12",
+              "displayName": "12",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "15",
+              "displayName": "15",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "18",
+              "displayName": "18",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "22",
+              "displayName": "22",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "24",
+              "displayName": "24",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "27",
+              "displayName": "27",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "29",
+              "displayName": "29",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "30",
+              "displayName": "30",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "33",
+              "displayName": "33",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "35",
+              "displayName": "35",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1500,
+        300
+      ],
+      "id": "9a5af228-afc7-4157-9ce2-e58861783fd3",
+      "name": "Send Data",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "credentials": {
+        "googleApi": {
+          "id": "eocV2BBNNMkAOGPj",
+          "name": "Google Sheets account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "66a65b82-cd02-4b5d-98ee-136badad9220",
+              "leftValue": "={{ $json.Run }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -900,
+        100
+      ],
+      "id": "dd24f254-ddb6-4362-9699-bdf15603dad3",
+      "name": "Time Slot Available?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1facad23-a54d-4fad-8a69-58b3f2dbb153",
+              "leftValue": "={{ $json.passed }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -700,
+        100
+      ],
+      "id": "3085ca6b-4ea3-4a15-ba31-ae345af0ba38",
+      "name": "Time is 5:30 AM?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5ffca535-55d0-4365-a5b5-889b065944e6",
+              "name": "Stike Price",
+              "value": "={{ $json[\"Strike Price\"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -260,
+        200
+      ],
+      "id": "2e3b9418-6860-477f-a927-6bfa51968b89",
+      "name": "Get Strike Price"
+    },
+    {
+      "parameters": {
+        "jsCode": "const strikePrices = $input.all().map(item => {\n  // Extract numeric strike value before the space\n  const raw = item.json[\"Stike Price\"];\n  return parseInt(raw.split(\" \")[0], 10);\n});\n\n// Get unique prices only\nconst uniquePrices = [...new Set(strikePrices)];\n\n// Find lower and upper\nconst lowerStrike = Math.min(...uniquePrices);\nconst upperStrike = Math.max(...uniquePrices);\n\nreturn [\n  {\n    json: {\n      lowerStrike,\n      upperStrike\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        200
+      ],
+      "id": "6319e902-eeb1-422c-ad78-05c12a4c250c",
+      "name": "Process Stike Price"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "024d8465-bf82-412e-a4cf-f5f1857fe3c6",
+              "name": "type",
+              "value": "={{ $('Loop All Strike Price').first().json.type }}",
+              "type": "string"
+            },
+            {
+              "id": "f9cd77e0-d512-47cd-94b2-8dbc673503c8",
+              "name": "entry",
+              "value": "={{ $('Loop All Strike Price').first().json.entry  }}",
+              "type": "string"
+            },
+            {
+              "id": "bdacd8fc-c89e-4790-ba4d-e0ecf74bf551",
+              "name": "expiry",
+              "value": "={{ $('Loop All Strike Price').first().json.expiry }}",
+              "type": "string"
+            },
+            {
+              "id": "a39337fb-329b-4363-b8d7-52068abe930a",
+              "name": "symbol_C",
+              "value": "={{ $('Loop All Strike Price').first().json.symbol_C }}",
+              "type": "string"
+            },
+            {
+              "id": "7d3a146c-d17b-42be-a6a7-ad1d234c4d06",
+              "name": "symbol_P",
+              "value": "={{ $('Loop All Strike Price').first().json.symbol_P }}",
+              "type": "string"
+            },
+            {
+              "id": "cea1fa49-7282-4548-99c0-17ad620d872a",
+              "name": "current_time",
+              "value": "={{ $('Loop All Strike Price').first().json.current_time }}",
+              "type": "string"
+            },
+            {
+              "id": "b42552ce-6f13-450b-9062-675696f80f47",
+              "name": "entry_time",
+              "value": "={{ $('Loop All Strike Price').first().json.entry_time }}",
+              "type": "string"
+            },
+            {
+              "id": "d685beb0-c838-44ce-bbd3-52948ea1459b",
+              "name": "expiry_time",
+              "value": "={{ $('Loop All Strike Price').first().json.expiry_time }}",
+              "type": "string"
+            },
+            {
+              "id": "12e8b9dc-f713-422d-86b7-3458e834dacd",
+              "name": "total_hours",
+              "value": "={{ $('Loop All Strike Price').first().json.total_hours }}",
+              "type": "string"
+            },
+            {
+              "id": "cedb3dd8-3c7d-4d6e-8820-21f6dc671807",
+              "name": "passed_hours",
+              "value": "={{ $('Loop All Strike Price').first().json.passed_hours }}",
+              "type": "string"
+            },
+            {
+              "id": "dde709a4-973a-4cd7-8577-65a41cfae621",
+              "name": "Run",
+              "value": "={{ $('Loop All Strike Price').first().json.Run }}",
+              "type": "string"
+            },
+            {
+              "id": "c1e06910-65ee-45df-98ff-f02c82c4f1e5",
+              "name": "lowerStrike",
+              "value": "={{ $json.lowerStrike }}",
+              "type": "number"
+            },
+            {
+              "id": "ef971f56-e965-4d81-a1f5-ac0c402a1106",
+              "name": "upperStrike",
+              "value": "={{ $json.upperStrike }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        180,
+        200
+      ],
+      "id": "f461b8f6-d6aa-4383-93e3-8cfe6da21e2e",
+      "name": "Form Stike Price After 5:30"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Step 1: Get required symbols from 'Form Strike Price' node\nconst symbolsFromNode = $('Form Strike Price').all().map(item => item.json.symbol);\n\n// Step 2: Get all tickers from previous HTTP node\nconst allTickers = $json.result || [];\n\n// Step 3: Filter only the required symbols\nconst filtered = allTickers.filter(item =>\n  symbolsFromNode.includes(item.symbol)\n);\n\n// Step 4: Group by strike price\nconst grouped = {};\n\nfor (const item of filtered) {\n  const strike = item.strike_price;\n\n  if (!grouped[strike]) {\n    grouped[strike] = {};\n  }\n\n  if (item.contract_type === 'call_options') {\n    grouped[strike].call = item;\n  } else if (item.contract_type === 'put_options') {\n    grouped[strike].put = item;\n  }\n}\n\n// Step 5: Sort by strike price ASC\nconst sortedStrikes = Object.keys(grouped).sort((a, b) => Number(b) - Number(a));\n\n// Step 6: Flatten call → put for each strike\nconst result = [];\n\nfor (const strike of sortedStrikes) {\n  const group = grouped[strike];\n  if (group.call) {\n    result.push({\n      json: {\n        symbol: group.call.symbol,\n        mark_price: group.call.mark_price,\n        strike_price: group.call.strike_price,\n        type: group.call.contract_type\n      }\n    });\n  }\n  if (group.put) {\n    result.push({\n      json: {\n        symbol: group.put.symbol,\n        mark_price: group.put.mark_price,\n        strike_price: group.put.strike_price,\n        type: group.put.contract_type\n      }\n    });\n  }\n}\n\nreturn result;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        100
+      ],
+      "id": "edb7c7b6-7ba9-4aa7-8906-5b9eba835f11",
+      "name": "Fetch Market Price"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA",
+          "mode": "list",
+          "cachedResultName": "Delta Exchange Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1035577510,
+          "mode": "list",
+          "cachedResultName": "BTC",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1er-pvTtTzdnZThOfZh8UoVlDJWSGxte1dqA0lA0meBA/edit#gid=1035577510"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Entry Date",
+              "lookupValue": "={{ $json.entry.replace(/^0/, '') }}"
+            },
+            {
+              "lookupColumn": "Expiry Date",
+              "lookupValue": "={{ $json.expiry.replace(/^0/, '') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -480,
+        200
+      ],
+      "id": "3c7acba7-4da9-4b07-b6d3-b077d5b1417c",
+      "name": "Get row(s) in sheet",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "credentials": {
+        "googleApi": {
+          "id": "eocV2BBNNMkAOGPj",
+          "name": "Google Sheets account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "timezone": "Asia/Kolkata"
+        }
+      },
+      "type": "n8n-nodes-base.dateTime",
+      "typeVersion": 2,
+      "position": [
+        -2020,
+        350
+      ],
+      "id": "c985bbd7-1a40-40f3-b52e-a4ac0caf61eb",
+      "name": "Date & Time"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get BTCUSDT Data": {
+      "main": [
+        [
+          {
+            "node": "Get Lower & Upper Strike",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Lower & Upper Strike": {
+      "main": [
+        [
+          {
+            "node": "Form Strike Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form Strike Price": {
+      "main": [
+        [
+          {
+            "node": "Get Strike Price Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Strike Price Data": {
+      "main": [
+        [
+          {
+            "node": "Fetch Market Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Date & Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Unique ID": {
+      "main": [
+        [
+          {
+            "node": "Check Unique ID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Generate Unique ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time Difference": {
+      "main": [
+        [
+          {
+            "node": "Time Slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time Slot": {
+      "main": [
+        [
+          {
+            "node": "Loop All Strike Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Entry & Exit Date": {
+      "main": [
+        [
+          {
+            "node": "Time Difference",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop All Strike Price": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Time Slot Available?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unique ID Exist?": {
+      "main": [
+        [
+          {
+            "node": "Get Unique ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unique ID": {
+      "main": [
+        [
+          {
+            "node": "Send Unique ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Unique ID": {
+      "main": [
+        [
+          {
+            "node": "Unique ID Exist?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time Slot Available?": {
+      "main": [
+        [
+          {
+            "node": "Time is 5:30 AM?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop All Strike Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time is 5:30 AM?": {
+      "main": [
+        [
+          {
+            "node": "Get BTCUSDT Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Strike Price": {
+      "main": [
+        [
+          {
+            "node": "Process Stike Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Stike Price": {
+      "main": [
+        [
+          {
+            "node": "Form Stike Price After 5:30",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form Stike Price After 5:30": {
+      "main": [
+        [
+          {
+            "node": "Form Strike Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Market Price": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Get Strike Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date & Time": {
+      "main": [
+        [
+          {
+            "node": "Get Entry & Exit Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Data": {
+      "main": [
+        [
+          {
+            "node": "Loop All Strike Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "99a429da-d9d7-4809-ab7d-d6ed317d8e0c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "184c3321f33bbaf64fd0e8877629ba809ac61b9465d76b6380084b70b3221d84"
+  },
+  "id": "O1tRmATQEYyG20Yt",
+  "tags": []
+}
